@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Rider – Uber-style Tracking</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 12px;
+      z-index: 1000;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="info">
+    <strong>Pickup ETA</strong><br/>
+    <div id="distance">Distance: —</div>
+    <div id="eta">ETA: —</div>
+    <div style="margin-top:6px">
+      🟢 You &nbsp;&nbsp; 🔴 Driver
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const trackingId = "abc123";
+    const socket = io();
+
+    let map, driverMarker, riderMarker, routeLine;
+    let riderLat = null, riderLng = null;
+    let driverLat = null, driverLng = null;
+
+    socket.emit("join", trackingId);
+
+    // -----------------------------
+    // Custom icons
+    // -----------------------------
+    const driverIcon = L.icon({
+      iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png",
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    });
+
+    const riderIcon = L.icon({
+      iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/green-dot.png",
+      iconSize: [32, 32],
+      iconAnchor: [16, 32]
+    });
+
+    // -----------------------------
+    // Init map
+    // -----------------------------
+    function initMap(lat, lng) {
+      map = L.map("map").setView([lat, lng], 14);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap contributors"
+      }).addTo(map);
+
+      setTimeout(() => map.invalidateSize(), 200);
+    }
+
+    // -----------------------------
+    // Rider GPS (GREEN)
+    // -----------------------------
+    navigator.geolocation.watchPosition(
+      pos => {
+        riderLat = pos.coords.latitude;
+        riderLng = pos.coords.longitude;
+
+        if (!map) initMap(riderLat, riderLng);
+
+        if (!riderMarker) {
+          riderMarker = L.marker([riderLat, riderLng], {
+            icon: riderIcon
+          }).addTo(map).bindPopup("You (Pickup)");
+        } else {
+          riderMarker.setLatLng([riderLat, riderLng]);
+        }
+
+        if (driverLat) drawRoute();
+      },
+      err => console.warn("Rider GPS error", err),
+      { enableHighAccuracy: true }
+    );
+
+    // -----------------------------
+    // Driver updates (RED)
+    // -----------------------------
+    socket.on("location_update", data => {
+      driverLat = data.lat;
+      driverLng = data.lng;
+
+      if (!map) initMap(driverLat, driverLng);
+
+      if (!driverMarker) {
+        driverMarker = L.marker([driverLat, driverLng], {
+          icon: driverIcon
+        }).addTo(map).bindPopup("Driver");
+      } else {
+        driverMarker.setLatLng([driverLat, driverLng]);
+      }
+
+      if (riderLat) drawRoute();
+    });
+
+    // -----------------------------
+    // Road route (BLUE)
+    // -----------------------------
+    async function drawRoute() {
+      const url =
+        `https://router.project-osrm.org/route/v1/driving/` +
+        `${driverLng},${driverLat};${riderLng},${riderLat}` +
+        `?overview=full&geometries=geojson`;
+
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!json.routes || !json.routes.length) return;
+
+      const route = json.routes[0];
+      const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+
+      if (routeLine) map.removeLayer(routeLine);
+
+      routeLine = L.polyline(coords, {
+        color: "blue",
+        weight: 5
+      }).addTo(map);
+
+      document.getElementById("distance").innerText =
+        `Distance: ${(route.distance / 1000).toFixed(2)} km`;
+
+      document.getElementById("eta").innerText =
+        `ETA: ${Math.ceil(route.duration / 60)} min`;
+
+      map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+    }
+  </script>
+
+</body>
+</html>

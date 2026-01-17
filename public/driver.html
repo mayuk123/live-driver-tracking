@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Driver – Live Location</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body>
+
+  <h2>Driver Location Sharing</h2>
+
+  <p><strong>Tracking ID:</strong> <span id="tid"></span></p>
+
+  <button id="start">Start Sharing Location</button>
+
+  <pre id="log">Waiting...</pre>
+
+  <!-- Socket.IO client -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // ===============================
+    // CONFIG
+    // ===============================
+    const trackingId = "abc123"; // hardcoded for now
+    document.getElementById("tid").innerText = trackingId;
+
+    const socket = io();
+
+    socket.emit("join", trackingId);
+
+    const log = (msg) => {
+      document.getElementById("log").innerText = msg;
+    };
+
+    document.getElementById("start").onclick = () => {
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported");
+        return;
+      }
+
+      log("Starting GPS tracking...");
+
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          const payload = {
+            trackingId,
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          };
+
+          socket.emit("driver_location", payload);
+
+          log(
+            "Sending location:\n" +
+            JSON.stringify(payload, null, 2)
+          );
+        },
+        (err) => {
+          alert("GPS error: " + err.message);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000
+        }
+      );
+    };
+  </script>
+
+</body>
+</html>

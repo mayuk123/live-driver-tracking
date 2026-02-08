@@ -5,7 +5,10 @@
   <title>Rider – Uber-style Tracking</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
   <style>
     html, body {
@@ -47,6 +50,9 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
+    // =============================
+    // CONFIG
+    // =============================
     const trackingId = "abc123";
     const socket = io();
 
@@ -54,11 +60,23 @@
     let riderLat = null, riderLng = null;
     let driverLat = null, driverLng = null;
 
-    socket.emit("join", trackingId);
+    console.log("🟢 Rider page loaded");
+    console.log("🆔 trackingId =", trackingId);
 
-    // -----------------------------
+    // =============================
+    // Socket connection debug
+    // =============================
+    socket.on("connect", () => {
+      console.log("🔌 Rider socket connected:", socket.id);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("❌ Rider socket disconnected");
+    });
+
+    // =============================
     // Custom icons
-    // -----------------------------
+    // =============================
     const driverIcon = L.icon({
       iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png",
       iconSize: [32, 32],
@@ -71,10 +89,12 @@
       iconAnchor: [16, 32]
     });
 
-    // -----------------------------
+    // =============================
     // Init map
-    // -----------------------------
+    // =============================
     function initMap(lat, lng) {
+      console.log("🗺️ Initializing map at:", lat, lng);
+
       map = L.map("map").setView([lat, lng], 14);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -85,17 +105,62 @@
       setTimeout(() => map.invalidateSize(), 200);
     }
 
-    // -----------------------------
+    // =============================
+    // STEP 2️⃣ — Load last driver location (reload-safe)
+    // =============================
+    async function loadLastDriverLocation() {
+      console.log("🌐 Fetching last driver location via HTTP...");
+
+      try {
+        const res = await fetch(`/api/last-location/${trackingId}`, {
+          cache: "no-store"
+        });
+
+        if (!res.ok) {
+          console.warn("⚠️ No last driver location yet (HTTP)");
+          return;
+        }
+
+        const data = await res.json();
+        console.log("✅ HTTP last location received:", data);
+
+        driverLat = data.lat;
+        driverLng = data.lng;
+
+        if (!map) initMap(driverLat, driverLng);
+
+        driverMarker = L.marker([driverLat, driverLng], {
+          icon: driverIcon
+        }).addTo(map).bindPopup("Driver (last known)");
+
+      } catch (err) {
+        console.error("❌ Error fetching last driver location:", err);
+      }
+    }
+
+    // 🔥 CALL ON PAGE LOAD
+    loadLastDriverLocation();
+
+    // =============================
+    // Socket join
+    // =============================
+    console.log("➡️ Rider joining room:", trackingId);
+    socket.emit("join", trackingId);
+
+    // =============================
     // Rider GPS (GREEN)
-    // -----------------------------
+    // =============================
     navigator.geolocation.watchPosition(
       pos => {
+        console.log("📍 Rider GPS received:", pos.coords);
+
         riderLat = pos.coords.latitude;
         riderLng = pos.coords.longitude;
 
         if (!map) initMap(riderLat, riderLng);
 
         if (!riderMarker) {
+          console.log("🟢 Creating rider marker");
           riderMarker = L.marker([riderLat, riderLng], {
             icon: riderIcon
           }).addTo(map).bindPopup("You (Pickup)");
@@ -105,20 +170,23 @@
 
         if (driverLat) drawRoute();
       },
-      err => console.warn("Rider GPS error", err),
+      err => console.warn("❌ Rider GPS error:", err),
       { enableHighAccuracy: true }
     );
 
-    // -----------------------------
-    // Driver updates (RED)
-    // -----------------------------
+    // =============================
+    // STEP 3️⃣ — Driver updates (Socket)
+    // =============================
     socket.on("location_update", data => {
+      console.log("📡 Socket location_update received:", data);
+
       driverLat = data.lat;
       driverLng = data.lng;
 
       if (!map) initMap(driverLat, driverLng);
 
       if (!driverMarker) {
+        console.log("🔴 Creating driver marker from socket");
         driverMarker = L.marker([driverLat, driverLng], {
           icon: driverIcon
         }).addTo(map).bindPopup("Driver");
@@ -129,10 +197,12 @@
       if (riderLat) drawRoute();
     });
 
-    // -----------------------------
+    // =============================
     // Road route (BLUE)
-    // -----------------------------
+    // =============================
     async function drawRoute() {
+      console.log("🛣️ Drawing route");
+
       const url =
         `https://router.project-osrm.org/route/v1/driving/` +
         `${driverLng},${driverLat};${riderLng},${riderLat}` +
